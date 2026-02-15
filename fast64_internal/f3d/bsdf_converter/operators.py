@@ -117,6 +117,7 @@ class F3D_ConvertBSDF(OperatorBase):
             materials: dict[Material, Material] = {}
             mesh_data_map: dict = {}  # Track copied mesh data to preserve sharing
             converted_something = False
+            restored_linked: dict[Material, Material] = {}  # Track linked material restorations
             for old_obj in objs:  # make copies and convert them
                 obj = old_obj.copy()
                 # Link to same collections as original
@@ -127,6 +128,9 @@ class F3D_ConvertBSDF(OperatorBase):
                 if old_obj.data not in mesh_data_map:
                     mesh_data_map[old_obj.data] = old_obj.data
                     obj.data = mesh_data_map[old_obj.data]
+                    # Restore linked materials before converting
+                    restored = self.restore_linked_materials(obj, self.direction, restored_linked)
+                    converted_something |= restored
                     if self.direction == "F3D":
                         converted_something |= obj_to_f3d(
                             obj, materials, lights_for_colors, default_to_fog, set_rendermode_without_fog
@@ -200,6 +204,10 @@ class F3D_ConvertBSDF(OperatorBase):
                 # F3D direction stores (new_mat, abstracted_mat) tuple, BSDF direction stores just new_mat
                 new_mat = conversion_result[0] if isinstance(conversion_result, tuple) else conversion_result
                 original_mat_name = old_mat.name
+                # Tag new material with linked source info if the original is linked
+                if old_mat.library:
+                    new_mat["linked_mat_source"] = old_mat.name
+                    new_mat["linked_mat_library"] = old_mat.library.filepath
                 # Always rename old material first to free up the name for the new one
                 # Skip renaming if the material is read-only (e.g., from linked library)
                 if not old_mat.library:
@@ -216,6 +224,42 @@ class F3D_ConvertBSDF(OperatorBase):
                 bpy.data.collections.remove(backup_collection)
             raise exc
         self.report({"INFO"}, "Done.")
+
+    @staticmethod
+    def restore_linked_materials(
+        obj: Object, direction: str, restored_linked: dict
+    ) -> bool:
+        """Check material slots for tagged materials and restore their linked originals.
+        Returns True if any materials were restored."""
+        restored_any = False
+        expect_f3d = direction == "F3D"  # If converting to F3D, we expect BSDF materials with linked F3D sources
+        for index, slot in enumerate(obj.material_slots):
+            mat = slot.material
+            if mat is None or mat.library:
+                continue
+            if "linked_mat_source" not in mat or "linked_mat_library" not in mat:
+                continue
+            source_name = mat["linked_mat_source"]
+            source_library = mat["linked_mat_library"]
+            # Check if we already found this linked material
+            if mat in restored_linked:
+                obj.material_slots[index].material = restored_linked[mat]
+                restored_any = True
+                continue
+            # Find the original linked material
+            for candidate in bpy.data.materials:
+                if (
+                    candidate.library
+                    and candidate.library.filepath == source_library
+                    and candidate.name == source_name
+                ):
+                    # Verify direction makes sense (restoring F3D when going to F3D, or BSDF when going to BSDF)
+                    if is_mat_f3d(candidate) == expect_f3d:
+                        restored_linked[mat] = candidate
+                        obj.material_slots[index].material = candidate
+                        restored_any = True
+                    break
+        return restored_any
 
 
 classes = (F3D_ConvertBSDF,)
