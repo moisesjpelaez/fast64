@@ -11,7 +11,7 @@ from bpy.types import (
     ShaderNode,
 )
 
-from ..utility import get_clean_color
+from ..utility import get_clean_color, gammaCorrect
 
 from .f3d_material import (
     combiner_uses,
@@ -101,12 +101,15 @@ def get_color_from_input(inp: str, previous_color: Color, f3d_mat: F3DMaterialPr
     elif inp == "SCALE":
         return Color(*list(f3d_mat.key_scale), previous_color.a)
     elif inp == "PRIMITIVE":
-        return Color(*get_clean_color(f3d_mat.prim_color, True))
+        corrected = gammaCorrect(f3d_mat.prim_color)
+        return Color(*corrected, f3d_mat.prim_color[3])
     elif inp == "ENVIRONMENT":
-        return Color(*get_clean_color(f3d_mat.env_color, True))
+        corrected = gammaCorrect(f3d_mat.env_color)
+        return Color(*corrected, f3d_mat.env_color[3])
     elif inp == "SHADE":
         if f3d_mat.rdp_settings.g_lighting and f3d_mat.set_lights and f3d_mat.use_default_lighting:
-            return Color(*get_clean_color(f3d_mat.default_light_color), previous_color.a)
+            corrected = gammaCorrect(f3d_mat.default_light_color)
+            return Color(*corrected, previous_color.a)
         return Color(1.0, 1.0, 1.0, previous_color.a)
     else:
         value = get_color_component(inp, f3d_mat, previous_color.a)
