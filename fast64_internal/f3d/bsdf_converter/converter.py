@@ -270,8 +270,11 @@ def material_to_f3d(
     rdp: RDPSettings = f3d_mat.rdp_settings
 
     if abstracted_mat.color is not None:
-        f3d_mat.default_light_color = tuple(abstracted_mat.color)
         f3d_mat.prim_color = tuple(abstracted_mat.color)
+        if lights_for_colors:
+            f3d_mat.default_light_color = tuple(abstracted_mat.color)
+        else:
+            f3d_mat.default_light_color = (1.0, 1.0, 1.0, 1.0)
     if lights_for_colors:
         f3d_mat.set_lights = True
 
