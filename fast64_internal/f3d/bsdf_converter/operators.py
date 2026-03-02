@@ -165,6 +165,24 @@ class F3D_ConvertBSDF(OperatorBase):
                     # Preserve the matrix_parent_inverse to maintain transform
                     obj.matrix_parent_inverse = old_obj.matrix_parent_inverse.copy()
 
+            # Reparent non-converted children of converted parents.
+            _converted = set(objs) | set(new_objs)
+            for candidate in list(bpy.data.objects):
+                if candidate in _converted:
+                    continue
+                if candidate.parent is not None and candidate.parent in old_to_new:
+                    new_parent = old_to_new[candidate.parent]
+                    try:
+                        _mpi = candidate.matrix_parent_inverse.copy()
+                        _pt = candidate.parent_type
+                        _pb = candidate.parent_bone
+                        candidate.parent = new_parent
+                        candidate.parent_type = _pt
+                        candidate.parent_bone = _pb
+                        candidate.matrix_parent_inverse = _mpi
+                    except (AttributeError, RuntimeError):
+                        pass  # Truly read-only linked library objects
+
             if self.backup:
                 name = "BSDF -> F3D Backup" if self.direction == "F3D" else "F3D -> BSDF Backup"
                 if name in bpy.data.collections:
