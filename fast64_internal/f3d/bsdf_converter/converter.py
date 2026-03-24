@@ -80,6 +80,11 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
         print("Creating bsdf principled shader node")
         shader_node = create_node(ShaderNodeBsdfPrincipled, "Shader", True)
         links.new(shader_node.outputs[0], output_node.inputs[0])
+        # restore preserved Principled BSDF properties
+        for prop_name, value in abstracted_mat.bsdf_props.items():
+            inp = shader_node.inputs.get(prop_name)
+            if inp is not None:
+                inp.default_value = value
         alpha_input = shader_node.inputs["Alpha"]
         color_input = shader_node.inputs["Base Color"]
         if bpy.data.version >= (4, 2, 0):
@@ -405,6 +410,10 @@ def material_to_f3d(
     else:
         rdp.rendermode_preset_cycle_1 = main_rendermode
     rdp.set_rendermode = set_rendermode_without_fog or rdp.g_fog  # sm64 should only set rendermode for fog
+
+    # store Principled BSDF properties as custom properties for round-trip preservation
+    for prop_name, value in abstracted_mat.bsdf_props.items():
+        new_material[f"bsdf_{prop_name}"] = value
 
     with bpy.context.temp_override(material=new_material):
         update_all_node_values(new_material, bpy.context)  # Update nodes

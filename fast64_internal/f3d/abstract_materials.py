@@ -174,6 +174,7 @@ class AbstractedN64Material:
     vertex_color_blend: str = "MULTIPLY"  # "MULTIPLY" or "MIX"
     vertex_color_mix_factor: str | None = None  # "TEXEL0_ALPHA", "SHADE_ALPHA", or "ENV_ALPHA"
     vertex_color_mix_factor_value: float = 0.5  # constant factor when vertex_color_mix_factor is "ENV_ALPHA"
+    bsdf_props: dict = dataclasses.field(default_factory=dict)  # Principled BSDF properties to preserve through round-trip
 
     @property
     def main_texture(self):
@@ -240,6 +241,11 @@ def f3d_mat_to_abstracted(material: Material):
             # decal implies the original material was lit (Principled BSDF),
             # even though g_lighting is off on N64 because SHADE is used for vertex colors
             abstracted_mat.lighting = True
+
+    # restore preserved Principled BSDF properties from custom properties
+    for key in material.keys():
+        if key.startswith("bsdf_"):
+            abstracted_mat.bsdf_props[key.removeprefix("bsdf_")] = material[key]
 
     # print(abstracted_mat)
     return abstracted_mat
@@ -381,6 +387,16 @@ def bsdf_mat_to_abstracted(material: Material):
         abstracted_mat.lighting = False
     else:
         abstracted_mat.lighting = True
+
+    # capture Principled BSDF properties that don't map to N64 but should survive round-trips
+    if color_shader.bl_idname == "ShaderNodeBsdfPrincipled":
+        for inp in color_shader.inputs:
+            if inp.links:
+                continue
+            val = inp.default_value
+            if hasattr(val, "__iter__"):
+                val = list(val)
+            abstracted_mat.bsdf_props[inp.name] = val
 
     # set color_inp to Base Color if the input exists, otherwise try Color, if neither work assert
     color_inp = next(("Base Color" for inp in color_shader.inputs if inp.name == "Base Color"), None)
