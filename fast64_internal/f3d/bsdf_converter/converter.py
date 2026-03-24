@@ -12,6 +12,7 @@ from bpy.types import (
     ShaderNodeBsdfTransparent,
     ShaderNodeBackground,
     ShaderNodeMath,
+    ShaderNodeMix,
     ShaderNodeMixRGB,
     ShaderNodeVertexColor,
     ShaderNodeTexCoord,
@@ -125,16 +126,18 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
     mix_factor_input = None  # for MIX blend: will be linked to factor source
     if abstracted_mat.vertex_color:  # create vertex color mix/mul node
         if abstracted_mat.vertex_color_blend == "MIX":
-            print("Creating vertex color node, mix rgb node (MIX blend) and setting color input")
-            vertex_color_mul = create_node(ShaderNodeMixRGB, "Vertex Color Mix", True)
-            vertex_color_mul.use_clamp, vertex_color_mul.blend_type = True, "MIX"
-            mix_factor_input = vertex_color_mul.inputs[0]
+            print("Creating vertex color node, mix color node (MIX blend) and setting color input")
+            vertex_color_mul = create_node(ShaderNodeMix, "Mix", True)
+            vertex_color_mul.data_type = "RGBA"
+            vertex_color_mul.blend_type = "MIX"
+            vertex_color_mul.clamp_factor = True
+            mix_factor_input = vertex_color_mul.inputs["Factor"]
             if abstracted_mat.vertex_color_mix_factor == "ENV_ALPHA":
                 mix_factor_input.default_value = abstracted_mat.vertex_color_mix_factor_value
             else:
                 mix_factor_input.default_value = 0
-            links.new(vertex_color_mul.outputs[0], color_input)
-            color_input = vertex_color_mul.inputs[2]
+            links.new(vertex_color_mul.outputs["Result"], color_input)
+            color_input = vertex_color_mul.inputs["B"]
         else:
             print("Creating vertex color node, mix rgb node and setting color input")
             vertex_color_mul = create_node(ShaderNodeMixRGB, "Vertex Color Mul", True)
@@ -156,7 +159,8 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
         )
         vertex_color.layer_name = "Col"
     if abstracted_mat.vertex_color:  # link vertex color to vertex color mul
-        links.new(vertex_color.outputs[0], vertex_color_mul.inputs[1])
+        vtx_color_input = vertex_color_mul.inputs.get("A", vertex_color_mul.inputs[1])
+        links.new(vertex_color.outputs[0], vtx_color_input)
         if mix_factor_input is not None and abstracted_mat.vertex_color_mix_factor == "SHADE_ALPHA":
             links.new(vertex_color.outputs[1], mix_factor_input)
     if abstracted_mat.vertex_alpha:
