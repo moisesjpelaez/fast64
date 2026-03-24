@@ -117,13 +117,26 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
 
     vertex_color = None
     vertex_color_mul = None
-    if abstracted_mat.vertex_color:  # create vertex color mul node
-        print("Creating vertex color node, mix rgb node and setting color input")
-        vertex_color_mul = create_node(ShaderNodeMixRGB, "Vertex Color Mul", True)
-        vertex_color_mul.use_clamp, vertex_color_mul.blend_type = True, "MULTIPLY"
-        vertex_color_mul.inputs[0].default_value = 1
-        links.new(vertex_color_mul.outputs[0], color_input)
-        color_input = vertex_color_mul.inputs[2]
+    mix_factor_input = None  # for MIX blend: will be linked to factor source
+    if abstracted_mat.vertex_color:  # create vertex color mix/mul node
+        if abstracted_mat.vertex_color_blend == "MIX":
+            print("Creating vertex color node, mix rgb node (MIX blend) and setting color input")
+            vertex_color_mul = create_node(ShaderNodeMixRGB, "Vertex Color Mix", True)
+            vertex_color_mul.use_clamp, vertex_color_mul.blend_type = True, "MIX"
+            mix_factor_input = vertex_color_mul.inputs[0]
+            if abstracted_mat.vertex_color_mix_factor == "ENV_ALPHA":
+                mix_factor_input.default_value = abstracted_mat.vertex_color_mix_factor_value
+            else:
+                mix_factor_input.default_value = 0
+            links.new(vertex_color_mul.outputs[0], color_input)
+            color_input = vertex_color_mul.inputs[2]
+        else:
+            print("Creating vertex color node, mix rgb node and setting color input")
+            vertex_color_mul = create_node(ShaderNodeMixRGB, "Vertex Color Mul", True)
+            vertex_color_mul.use_clamp, vertex_color_mul.blend_type = True, "MULTIPLY"
+            vertex_color_mul.inputs[0].default_value = 1
+            links.new(vertex_color_mul.outputs[0], color_input)
+            color_input = vertex_color_mul.inputs[2]
     if abstracted_mat.vertex_alpha:  # create vertex alpha mul node
         print("Creating vertex alpha node, mul node and setting color input")
         vertex_alpha_mul = create_node(ShaderNodeMath, "Vertex Alpha Mul", True, y_offset=alpha_y_offset)
@@ -139,6 +152,8 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
         vertex_color.layer_name = "Col"
     if abstracted_mat.vertex_color:  # link vertex color to vertex color mul
         links.new(vertex_color.outputs[0], vertex_color_mul.inputs[1])
+        if mix_factor_input is not None and abstracted_mat.vertex_color_mix_factor == "SHADE_ALPHA":
+            links.new(vertex_color.outputs[1], mix_factor_input)
     if abstracted_mat.vertex_alpha:
         if put_alpha_into_color:  # link vertex color's alpha to vertex alpha mul
             links.new(vertex_color.outputs[1], vertex_alpha_mul.inputs[0])
@@ -228,6 +243,8 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
 
         if abstracted_tex.set_color:
             links.new(tex_node.outputs[0], tex_color_input)
+            if mix_factor_input is not None and abstracted_mat.vertex_color_mix_factor == "TEXEL0_ALPHA":
+                links.new(tex_node.outputs[1], mix_factor_input)
         if abstracted_tex.set_alpha:
             if abstracted_tex.packed_alpha:  # i4/i8
                 links.new(tex_node.outputs[0], tex_alpha_input)
@@ -337,10 +354,34 @@ def material_to_f3d(
     if abstracted_mat.vertex_alpha is not None:
         alpha_inputs.append("SHADE")
 
-    required_inputs = max(len(color_inputs), len(alpha_inputs))
-    if required_inputs > 3:
-        raise PluginError("Too many inputs for combiner")
-    set_combiner_cycle(color_inputs)
+    # decal combiner: (TEXEL0 - SHADE) * factor + SHADE
+    use_decal = (
+        abstracted_mat.vertex_color_blend == "MIX"
+        and abstracted_mat.vertex_color_mix_factor is not None
+        and len(abstracted_mat.textures) > 0
+    )
+    if use_decal:
+        for inp_attr in ("A", "B", "C", "D"):
+            for combiner in (combiner1, combiner2):
+                setattr(combiner, inp_attr, "0")
+        combiner1.A = "TEXEL0"
+        combiner1.B = "SHADE"
+        combiner1.C = abstracted_mat.vertex_color_mix_factor
+        combiner1.D = "SHADE"
+        combiner2.D = "COMBINED"
+        if abstracted_mat.vertex_color_mix_factor == "ENV_ALPHA":
+            f3d_mat.env_color = (
+                f3d_mat.env_color[0],
+                f3d_mat.env_color[1],
+                f3d_mat.env_color[2],
+                abstracted_mat.vertex_color_mix_factor_value,
+            )
+        required_inputs = max(1, len(alpha_inputs))
+    else:
+        required_inputs = max(len(color_inputs), len(alpha_inputs))
+        if required_inputs > 3:
+            raise PluginError("Too many inputs for combiner")
+        set_combiner_cycle(color_inputs)
     set_combiner_cycle(alpha_inputs, "_alpha")
 
     rdp.g_tex_gen = abstracted_mat.uv_gen
@@ -407,7 +448,11 @@ def obj_to_f3d(
             return None
         layer_name = layer.name
         convertColorAttribute(obj.data, layer_name)
-        return obj.data.vertex_colors[layer_name]  # HACK: layer cannot be trusted
+        # HACK: layer cannot be trusted, and vertex_colors may be stale after conversion in Blender 4+
+        layer = obj.data.vertex_colors.get(layer_name)
+        if layer is None:
+            layer = obj.data.color_attributes.get(layer_name)
+        return layer
 
     for index, material_slot in enumerate(obj.material_slots):
         material = material_slot.material

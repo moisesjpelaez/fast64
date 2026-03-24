@@ -171,6 +171,9 @@ class AbstractedN64Material:
     texture_sets_col: bool = False
     texture_sets_alpha: bool = False
     uv_map: str = ""
+    vertex_color_blend: str = "MULTIPLY"  # "MULTIPLY" or "MIX"
+    vertex_color_mix_factor: str | None = None  # "TEXEL0_ALPHA", "SHADE_ALPHA", or "ENV_ALPHA"
+    vertex_color_mix_factor_value: float = 0.5  # constant factor when vertex_color_mix_factor is "ENV_ALPHA"
 
     @property
     def main_texture(self):
@@ -225,6 +228,19 @@ def f3d_mat_to_abstracted(material: Material):
             abstracted_mat.textures.append(f3d_tex_to_abstracted(tex_prop, sets_color, sets_alpha))
         abstracted_mat.texture_sets_col |= sets_color
         abstracted_mat.texture_sets_alpha |= sets_alpha
+
+    # detect decal combiner pattern: (TEXEL0 - SHADE) * C + SHADE
+    c1 = f3d_mat.combiner1
+    if c1.A == "TEXEL0" and c1.B == "SHADE" and c1.D == "SHADE":
+        if c1.C in ("TEXEL0_ALPHA", "SHADE_ALPHA", "ENV_ALPHA"):
+            abstracted_mat.vertex_color_blend = "MIX"
+            abstracted_mat.vertex_color_mix_factor = c1.C
+            if c1.C == "ENV_ALPHA":
+                abstracted_mat.vertex_color_mix_factor_value = f3d_mat.env_color[3]
+            # decal implies the original material was lit (Principled BSDF),
+            # even though g_lighting is off on N64 because SHADE is used for vertex colors
+            abstracted_mat.lighting = True
+
     # print(abstracted_mat)
     return abstracted_mat
 
@@ -477,6 +493,34 @@ def bsdf_mat_to_abstracted(material: Material):
     if len(found_uv_map_names) > 1:
         print(f"WARNING: More than 1 UV map being used in {material.name}. Using first UV map.")
     abstracted_mat.uv_map = found_uv_map_names[0] if len(found_uv_map_names) > 0 else ""
+
+    # detect MIX blend between vertex colors and textures (decal-style lerp)
+    if abstracted_mat.vertex_color is not None and len(textures) > 0:
+        mix_nodes = find_linked_nodes(
+            color_shader,
+            lambda node: node.bl_idname.startswith("ShaderNodeMix") and node.blend_type == "MIX",
+            specific_input_sockets={color_inp},
+        )
+        for mix_node in mix_nodes:
+            fac_input = mix_node.inputs[0] if mix_node.inputs[0].name.startswith("Fac") else None
+            if fac_input is None:
+                continue
+            if fac_input.links:
+                from_node = fac_input.links[0].from_node
+                from_socket = fac_input.links[0].from_socket
+                if from_node.bl_idname == "ShaderNodeTexImage":
+                    abstracted_mat.vertex_color_blend = "MIX"
+                    abstracted_mat.vertex_color_mix_factor = "TEXEL0_ALPHA"
+                    break
+                elif from_node.bl_idname == "ShaderNodeVertexColor" and from_socket.name == "Alpha":
+                    abstracted_mat.vertex_color_blend = "MIX"
+                    abstracted_mat.vertex_color_mix_factor = "SHADE_ALPHA"
+                    break
+            else:
+                abstracted_mat.vertex_color_blend = "MIX"
+                abstracted_mat.vertex_color_mix_factor = "ENV_ALPHA"
+                abstracted_mat.vertex_color_mix_factor_value = fac_input.default_value
+                break
 
     # very simple search for color mul nodes, only really for glTF import support
     # (glTF materials can have tex multiplied by base color multiplied vertex colors + lighting!)
