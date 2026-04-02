@@ -2661,14 +2661,44 @@ def shouldConvOrCreateColorAttribute(mesh: Mesh, attr_name="Col"):
 
 
 def convertColorAttribute(mesh: Mesh, attr_name="Col"):
-    prev_index = mesh.attributes.active_index
-    attr_index = mesh.attributes.find(attr_name)
-    if attr_index < 0:
-        raise PluginError(f"Failed to find the index for mesh attr {attr_name}. Attribute conversion has failed!")
+    attr = mesh.attributes.get(attr_name)
+    if attr is None:
+        raise PluginError(f"Failed to find mesh attr {attr_name}. Attribute conversion has failed!")
 
-    mesh.attributes.active_index = attr_index
-    bpy.ops.geometry.attribute_convert(mode="GENERIC", domain="CORNER", data_type="FLOAT_COLOR")
-    mesh.attributes.active_index = prev_index
+    # Already the correct type/domain — nothing to do.
+    if attr.domain == "CORNER" and attr.data_type == "FLOAT_COLOR":
+        return
+
+    # Read colors from the existing attribute and expand to per-loop (CORNER) layout.
+    num_loops = len(mesh.loops)
+    colors = [(1.0, 1.0, 1.0, 1.0)] * num_loops
+
+    def _read_color(data_item):
+        if hasattr(data_item, "color"):
+            c = data_item.color
+            return (c[0], c[1], c[2], c[3])
+        if hasattr(data_item, "vector"):
+            v = data_item.vector
+            return (v[0], v[1], v[2], 1.0)
+        return (1.0, 1.0, 1.0, 1.0)
+
+    if attr.domain == "CORNER":
+        for i in range(num_loops):
+            colors[i] = _read_color(attr.data[i])
+    elif attr.domain == "POINT":
+        for loop in mesh.loops:
+            colors[loop.index] = _read_color(attr.data[loop.vertex_index])
+    elif attr.domain == "FACE":
+        for poly in mesh.polygons:
+            c = _read_color(attr.data[poly.index])
+            for li in range(poly.loop_start, poly.loop_start + poly.loop_total):
+                colors[li] = c
+    # EDGE domain is not typical for color attributes; leave default white.
+
+    mesh.attributes.remove(attr)
+    new_attr = mesh.color_attributes.new(attr_name, "FLOAT_COLOR", "CORNER")
+    for i, color in enumerate(colors):
+        new_attr.data[i].color = color
 
 
 def addColorAttributesToModel(obj: Object):
