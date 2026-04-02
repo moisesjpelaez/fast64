@@ -2637,6 +2637,12 @@ def link_f3d_material_library():
         if group.library is not None and os.path.normpath(bpy.path.abspath(group.library.filepath)) == dir_abs:
             group.use_fake_user = True
 
+    # Remove the library scene — node groups are kept alive by fake users,
+    # so the scene itself is not needed and would otherwise leak into GLTF exports.
+    for scene in list(bpy.data.scenes):
+        if scene.library is not None and os.path.normpath(bpy.path.abspath(scene.library.filepath)) == dir_abs:
+            bpy.data.scenes.remove(scene)
+
     # TODO: Figure out a better way to save the user's old mode
     if prevMode != "OBJECT":
         bpy.ops.object.mode_set(mode=get_mode_set_from_context_mode(prevMode))
