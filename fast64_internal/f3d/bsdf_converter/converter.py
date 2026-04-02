@@ -41,6 +41,12 @@ from ..f3d_gbi import isUcodeF3DEX3
 
 
 def material_to_bsdf(material: Material, put_alpha_into_color=False):
+    existing_name = f"{material.name}_old"
+    existing_material = bpy.data.materials.get(existing_name)
+    if existing_material is not None and not is_mat_f3d(existing_material) and existing_material.library is None:
+        print(f"Reusing existing BSDF material {existing_name} for {material.name}")
+        return existing_material
+
     abstracted_mat = f3d_mat_to_abstracted(material)
 
     target_name = f"{material.name}_bsdf"
