@@ -456,15 +456,28 @@ def obj_to_f3d(
             loop_indexes[material].append(loop_idx)
 
     def get_layer_and_convert(layer_name: str | None):  # get color layer, convert it if needed
-        layer = obj.data.vertex_colors.get(layer_name or "", obj.data.vertex_colors.active)
+        layer = None
+
+        # Blender 4+ may store vertex colors only as color_attributes.
+        if layer_name:
+            layer = obj.data.color_attributes.get(layer_name)
+        if layer is None and layer_name:
+            layer = obj.data.vertex_colors.get(layer_name)
+        if layer is None:
+            layer = obj.data.color_attributes.active_color
+        if layer is None:
+            layer = obj.data.vertex_colors.active
         if layer is None:
             return None
+
         layer_name = layer.name
-        convertColorAttribute(obj.data, layer_name)
+        if layer_name in obj.data.attributes:
+            convertColorAttribute(obj.data, layer_name)
+
         # HACK: layer cannot be trusted, and vertex_colors may be stale after conversion in Blender 4+
-        layer = obj.data.vertex_colors.get(layer_name)
+        layer = obj.data.color_attributes.get(layer_name)
         if layer is None:
-            layer = obj.data.color_attributes.get(layer_name)
+            layer = obj.data.vertex_colors.get(layer_name)
         return layer
 
     for index, material_slot in enumerate(obj.material_slots):

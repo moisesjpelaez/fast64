@@ -2609,6 +2609,7 @@ def createScenePropertiesForMaterial(material: Material):
 
 def link_f3d_material_library():
     dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "f3d_material_library.blend")
+    dir_abs = os.path.normpath(bpy.path.abspath(dir))
 
     prevMode = bpy.context.mode
     if prevMode != "OBJECT":
@@ -2617,18 +2618,24 @@ def link_f3d_material_library():
     with bpy.data.libraries.load(dir) as (data_from, data_to):
         dirMat = os.path.join(dir, "Material")
         dirNode = os.path.join(dir, "NodeTree")
+        library_groups = {name for name in data_from.node_groups if name is not None}
         for mat in data_from.materials:
             if mat is not None:
                 bpy.ops.wm.link(filepath=os.path.join(dirMat, mat), directory=dirMat, filename=mat)
 
         # linking is SUPER slow, this only links if the scene hasnt been linked yet
         # in future updates, this will likely need to be something numerated so if more nodes are added then they will be linked
-        if bpy.context.scene.get("f3d_lib_dir") != dirNode:
+        if bpy.context.scene.get("f3d_lib_dir") != dirNode or not library_groups.issubset(bpy.data.node_groups.keys()):
             # link groups after to bring extra node_groups
             for node_group in data_from.node_groups:
                 if node_group is not None:
                     bpy.ops.wm.link(filepath=os.path.join(dirNode, node_group), directory=dirNode, filename=node_group)
             bpy.context.scene["f3d_lib_dir"] = dirNode
+
+    # Keep all Fast64 node groups alive across orphan purges.
+    for group in bpy.data.node_groups:
+        if group.library is not None and os.path.normpath(bpy.path.abspath(group.library.filepath)) == dir_abs:
+            group.use_fake_user = True
 
     # TODO: Figure out a better way to save the user's old mode
     if prevMode != "OBJECT":
