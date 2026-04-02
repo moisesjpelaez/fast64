@@ -157,7 +157,7 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
         vertex_color = create_node(
             ShaderNodeVertexColor, "Vertex Color", True, y_offset=0 if abstracted_mat.vertex_color else alpha_y_offset
         )
-        vertex_color.layer_name = "Col"
+        vertex_color.layer_name = abstracted_mat.vertex_color if isinstance(abstracted_mat.vertex_color, str) else "Col"
     if abstracted_mat.vertex_color:  # link vertex color to vertex color mul
         vtx_color_input = vertex_color_mul.inputs.get("A", vertex_color_mul.inputs[1])
         links.new(vertex_color.outputs[0], vtx_color_input)
@@ -168,7 +168,7 @@ def material_to_bsdf(material: Material, put_alpha_into_color=False):
             links.new(vertex_color.outputs[1], vertex_alpha_mul.inputs[0])
         else:  # create vertex alpha node
             vertex_alpha = create_node(ShaderNodeVertexColor, "Vertex Alpha", True, y_offset=alpha_y_offset)
-            vertex_alpha.layer_name = "Alpha"
+            vertex_alpha.layer_name = abstracted_mat.vertex_alpha if isinstance(abstracted_mat.vertex_alpha, str) else "Alpha"
             links.new(vertex_alpha.outputs[0], vertex_alpha_mul.inputs[0])
 
     # support for glTF base color which gets multiplied on to textures
@@ -508,6 +508,10 @@ def obj_to_f3d(
 
     while len(obj.data.vertex_colors) > 0:  # remove all existing colors
         obj.data.vertex_colors.remove(obj.data.vertex_colors[0])
+    # remove existing Col/Alpha color attributes to avoid duplicates
+    for attr_name in ("Col", "Alpha"):
+        if attr_name in obj.data.color_attributes:
+            obj.data.color_attributes.remove(obj.data.color_attributes[attr_name])
     # get the alpha as rgb, then flatten it
     alpha_layer = obj.data.color_attributes.new("Alpha", "FLOAT_COLOR", "CORNER")
     alpha_layer.data.foreach_set("color", np.repeat(colors[:, 3][:, np.newaxis], 4, axis=1).flatten())
