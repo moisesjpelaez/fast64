@@ -538,6 +538,31 @@ def bsdf_mat_to_abstracted(material: Material):
                 abstracted_mat.vertex_color_mix_factor_value = fac_input.default_value
                 break
 
+    # detect MULTIPLY blend between vertex colors and textures (multiply with alpha blending)
+    if abstracted_mat.vertex_color is not None and len(textures) > 0 and abstracted_mat.vertex_color_blend == "MULTIPLY":
+        mul_nodes = find_linked_nodes(
+            color_shader,
+            lambda node: node.bl_idname.startswith("ShaderNodeMix") and node.blend_type == "MULTIPLY",
+            specific_input_sockets={color_inp},
+        )
+        for mul_node in mul_nodes:
+            fac_input = mul_node.inputs[0] if mul_node.inputs[0].name.startswith("Fac") else None
+            if fac_input is None:
+                continue
+            if fac_input.links:
+                from_node = fac_input.links[0].from_node
+                from_socket = fac_input.links[0].from_socket
+                if from_node.bl_idname == "ShaderNodeTexImage":
+                    abstracted_mat.vertex_color_mix_factor = "TEXEL0_ALPHA"
+                    break
+                elif from_node.bl_idname == "ShaderNodeVertexColor" and from_socket.name == "Alpha":
+                    abstracted_mat.vertex_color_mix_factor = "SHADE_ALPHA"
+                    break
+            else:
+                abstracted_mat.vertex_color_mix_factor = "ENV_ALPHA"
+                abstracted_mat.vertex_color_mix_factor_value = fac_input.default_value
+                break
+
     # very simple search for color mul nodes, only really for glTF import support
     # (glTF materials can have tex multiplied by base color multiplied vertex colors + lighting!)
 
@@ -546,11 +571,12 @@ def bsdf_mat_to_abstracted(material: Material):
         for node in nodes:
             solid_color, non_solid = None, False
             for inp in node.inputs:  # find all nodes that are multiplied by solid colors but have another input
-                if not inp.name.startswith("Fac"):
-                    if inp.links:
-                        non_solid = True
-                    else:
-                        solid_color = inp.default_value
+                if not inp.enabled or inp.name.startswith("Fac"):
+                    continue
+                if inp.links:
+                    non_solid = True
+                else:
+                    solid_color = inp.default_value
             if solid_color is not None and non_solid:
                 solid_colors.append(solid_color)
         if len(solid_colors) > 1:

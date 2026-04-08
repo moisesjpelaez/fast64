@@ -375,6 +375,12 @@ def material_to_f3d(
         and abstracted_mat.vertex_color_mix_factor is not None
         and len(abstracted_mat.textures) > 0
     )
+    # multiply combiner with alpha: lerp(SHADE, TEXEL0 * SHADE, factor)
+    use_multiply_blend = (
+        abstracted_mat.vertex_color_blend == "MULTIPLY"
+        and abstracted_mat.vertex_color_mix_factor is not None
+        and len(abstracted_mat.textures) > 0
+    )
     if use_decal:
         for inp_attr in ("A", "B", "C", "D"):
             for combiner in (combiner1, combiner2):
@@ -392,6 +398,30 @@ def material_to_f3d(
                 abstracted_mat.vertex_color_mix_factor_value,
             )
         required_inputs = max(1, len(alpha_inputs))
+    elif use_multiply_blend:
+        # Cycle 1: TEXEL0 * SHADE
+        # Cycle 2: (COMBINED - SHADE) * factor + SHADE = lerp(SHADE, TEXEL0*SHADE, factor)
+        # In 2-cycle mode, TEXEL0/TEXEL1 swap in cycle 2, so use TEXEL1_ALPHA for tile 0's alpha
+        mix_factor = abstracted_mat.vertex_color_mix_factor
+        if mix_factor == "TEXEL0_ALPHA":
+            mix_factor = "TEXEL1_ALPHA"
+        for inp_attr in ("A", "B", "C", "D"):
+            for combiner in (combiner1, combiner2):
+                setattr(combiner, inp_attr, "0")
+        combiner1.A = "TEXEL0"
+        combiner1.C = "SHADE"
+        combiner2.A = "COMBINED"
+        combiner2.B = "SHADE"
+        combiner2.C = mix_factor
+        combiner2.D = "SHADE"
+        if abstracted_mat.vertex_color_mix_factor == "ENV_ALPHA":
+            f3d_mat.env_color = (
+                f3d_mat.env_color[0],
+                f3d_mat.env_color[1],
+                f3d_mat.env_color[2],
+                abstracted_mat.vertex_color_mix_factor_value,
+            )
+        required_inputs = 3  # force 2-cycle
     else:
         required_inputs = max(len(color_inputs), len(alpha_inputs))
         if required_inputs > 3:
