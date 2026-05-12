@@ -529,23 +529,23 @@ def obj_to_f3d(
 
         if uvs is not None:  # apply the used uv or fallback on active
             uv_map_layer = obj.data.uv_layers.get(abstracted_mat.uv_map or "", obj.data.uv_layers.active)
-            print(f"Updating main UV map with {uv_map_layer.name} UVs from {material.name}.")
             if uv_map_layer is not None:
-                for loop_index in loop_indexes[material]:
+                print(f"Updating main UV map with {uv_map_layer.name} UVs from {material.name}.")
+                for loop_index in loop_indexes.get(material, []):
                     uvs[loop_index] = uv_map_layer.data[loop_index].uv
 
         # apply the used color/alpha or fallback on active
         col_layer = get_layer_and_convert(abstracted_mat.vertex_color)
         if col_layer is not None:
-            for loop_idx in loop_indexes[material]:
+            for loop_idx in loop_indexes.get(material, []):
                 colors[loop_idx, :3] = col_layer.data[loop_idx].color[:3]
         alpha_layer = get_layer_and_convert(abstracted_mat.vertex_alpha)
         if alpha_layer is not None:
             if abstracted_mat.alpha_is_median:
-                for loop_idx in loop_indexes[material]:
+                for loop_idx in loop_indexes.get(material, []):
                     colors[loop_idx, 3] = colorToLuminance(alpha_layer.data[loop_idx].color)
             else:
-                for loop_idx in loop_indexes[material]:
+                for loop_idx in loop_indexes.get(material, []):
                     colors[loop_idx, 3] = alpha_layer.data[loop_idx].color[3]
 
     if uvs is not None:  # If there wasn´t exactly one UV map, we need to create one singular UV map
